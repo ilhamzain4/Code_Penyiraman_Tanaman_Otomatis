@@ -1,0 +1,68 @@
+#include <LiquidCrystal.h>
+
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+void setup() {
+  lcd.begin(16, 2);
+  pinMode(7, OUTPUT);  // relay (lewat transistor)
+  pinMode(8, OUTPUT);  // LED
+}
+
+void loop() {
+  float k = analogRead(A0) * 100.0 / 1023.0;                // kelembapan tanah (%)
+  float t = (analogRead(A1) * 5.0 / 1023.0 - 0.5) * 100.0;  // suhu (C)
+
+  // 1. FUZZIFIKASI: ubah angka jadi derajat keanggotaan (0 sampai 1)
+  float kering = constrain((50 - k) / 20, 0, 1);
+  float lembap = constrain(1 - fabs(k - 50) / 20, 0, 1);
+  float basah  = constrain((k - 50) / 20, 0, 1);
+
+  float dingin = constrain((26 - t) / 6, 0, 1);
+  float normal = constrain(1 - fabs(t - 28) / 6, 0, 1);
+  float panas  = constrain((t - 30) / 6, 0, 1);
+
+  // 2. ATURAN: kekuatan aturan = nilai terkecil dari kedua syaratnya
+  float a1 = min(kering, dingin);  // kering + dingin -> 20 detik
+  float a2 = min(kering, normal);  // kering + normal -> 30 detik
+  float a3 = min(kering, panas);   // kering + panas  -> 40 detik
+  float a4 = min(lembap, dingin);  // lembap + dingin ->  0 detik
+  float a5 = min(lembap, normal);  // lembap + normal -> 10 detik
+  float a6 = min(lembap, panas);   // lembap + panas  -> 20 detik
+  float a7 = min(basah, dingin);   // basah  + dingin ->  0 detik
+  float a8 = min(basah, normal);   // basah  + normal ->  0 detik
+  float a9 = min(basah, panas);    // basah  + panas  ->  0 detik
+
+  // 3. DEFUZZIFIKASI SUGENO: rata-rata terbobot
+  float atas  = a1 * 20 + a2 * 30 + a3 * 40 + a4 * 0 + a5 * 10 + a6 * 20 + a7 * 0 + a8 * 0 + a9 * 0;
+  float bawah = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9;
+  float durasi = (bawah > 0) ? atas / bawah : 0;
+
+  // Status tanah untuk LCD
+  const char* status = "LEMBAP";
+  if (kering >= lembap && kering >= basah) status = "KERING";
+  else if (basah >= lembap) status = "BASAH";
+
+  // LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Suhu:");
+  lcd.print(t, 1);
+  lcd.print("C ");
+  lcd.print(k, 0);
+  lcd.print("%");
+  lcd.setCursor(0, 1);
+  lcd.print(status);
+  lcd.print(" ");
+  lcd.print(durasi, 0);
+  lcd.print("dtk");
+
+  // Pompa nyala sesuai durasi hasil fuzzy
+  if (durasi >= 1) {
+    digitalWrite(7, HIGH);
+    digitalWrite(8, HIGH);
+    delay(durasi * 1000);
+    digitalWrite(7, LOW);
+    digitalWrite(8, LOW);
+  }
+  delay(2000);  // jeda agar air meresap
+}
